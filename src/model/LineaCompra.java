@@ -14,4 +14,13 @@ public class LineaCompra {
     public double getSubtotal() {
         return cantidad * precioUnitario;
     }
+
+    public Producto getProducto() {
+        return producto;
+    }
+
+    public int getCantidad() {
+        return cantidad; }
+
+
 }

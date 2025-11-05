@@ -26,4 +26,8 @@ public class Fabrica {
     public int getId() { return id; }
     public String getPais() { return pais; }
     public String getCiudad() { return ciudad; }
+
+    public int getCapacidad() { return capacidad; }
+    public int getNivelAutomatizacion() { return nivelAutomatizacion; }
+
 }

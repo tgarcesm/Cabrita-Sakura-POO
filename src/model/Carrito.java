@@ -21,4 +21,8 @@ public class Carrito {
     }
 
     public ArrayList<LineaCarrito> getLineas() { return lineas; }
+
+    public int getId() { return id; }
+    public String getFechaCreacion() { return fechaCreacion; }
+
 }

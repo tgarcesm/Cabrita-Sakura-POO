@@ -9,4 +9,13 @@ public class DesarrolladorProducto extends Usuario {
     }
 
     public void desarrollarProducto() { }
+
+    public boolean getPermisoEdicion() {
+        return permisoEdicion;
+    }
+
+    public void setPermisoEdicion(boolean permisoEdicion) {
+        this.permisoEdicion = permisoEdicion;
+    }
+
 }

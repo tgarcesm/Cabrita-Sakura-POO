@@ -12,4 +12,12 @@ public class AdministradorContenido extends Usuario {
     public void editarProducto() { }
     public void publicarProducto() { }
     public void borrarProducto() { }
+
+    public boolean getPermisosEdicion() {
+        return permisosEdicion;
+    }
+    public void setPermisosEdicion(boolean permisosEdicion) {
+        this.permisosEdicion = permisosEdicion;
+    }
+
 }

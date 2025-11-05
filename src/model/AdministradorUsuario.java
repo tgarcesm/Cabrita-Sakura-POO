@@ -12,5 +12,13 @@ public class AdministradorUsuario extends Usuario {
     public void suspenderUsuario() { }
     public void asignarUsuario() { }
     public void borrarUsuario() { }
+
+    public int getNivelAcceso() {
+        return nivelAcceso;
+    }
+
+    public void setNivelAcceso(int nivelAcceso) {
+        this.nivelAcceso = nivelAcceso;
+    }
 }
 

@@ -12,4 +12,16 @@ public class ConsejoSombrio {
     public void verMiembros() {
         for (Usuario u : miembros) System.out.println(u.getNombre() + " - " + u.getRol());
     }
+
+    public int getId() {
+        return id;
+    }
+
+    public String getNombreClave() {
+        return nombreClave;
+    }
+
+    public ArrayList<Usuario> getMiembros() {
+        return miembros;
+    }
 }

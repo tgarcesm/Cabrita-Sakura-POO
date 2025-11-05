@@ -26,4 +26,11 @@ public class TrabajadorEsclavizado {
     public String getNombre() {
         return nombre;
     }
+
+    public String getPaisOrigen() { return paisOrigen; }
+    public int getEdad() { return edad; }
+    public String getFechaCaptura() { return fechaCaptura; }
+    public String getSalud() { return salud; }
+    public boolean getAsignado() { return asignado; } // usa get... para boolean para ser consistentes
+
 }
