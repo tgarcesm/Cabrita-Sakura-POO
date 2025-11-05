@@ -18,4 +18,12 @@ public class TrabajadorEsclavizado {
         this.salud = salud;
         this.asignado = asignado;
     }
+
+    public int getId() {
+        return id;
+    }
+
+    public String getNombre() {
+        return nombre;
+    }
 }
