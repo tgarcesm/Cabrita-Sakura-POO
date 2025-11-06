@@ -30,4 +30,7 @@ public class Fabrica {
     public int getCapacidad() { return capacidad; }
     public int getNivelAutomatizacion() { return nivelAutomatizacion; }
 
+    public ArrayList<TrabajadorEsclavizado> getTrabajadores() {
+        return trabajadores;
+    }
 }

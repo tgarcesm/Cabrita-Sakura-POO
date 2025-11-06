@@ -190,12 +190,12 @@ public class Main {
     }
 
     private static void mostrarMenuLogin() {
-        System.out.println("============== SAKURA ENTERPRISES - LOGIN ==============");
+        System.out.println("============== GLOW UP LOGIN ==============");
         System.out.println("1. Iniciar sesión");
         System.out.println("2. Registrarse como cliente");
         System.out.println("3. Restablecer contraseña (por email)");
         System.out.println("4. Salir");
-        System.out.println("========================================================");
+        System.out.println("==========================================");
     }
 
     // ================== MENÚS ==================
@@ -528,9 +528,15 @@ public class Main {
                         System.out.print("Capacidad: "); int cap = Integer.parseInt(sc.nextLine());
                         System.out.print("Nivel automatización: "); int auto = Integer.parseInt(sc.nextLine());
                         st.fabricas.add(new Fabrica(idF, pais, ciudad, cap, auto));
-                        System.out.println("✅ Fábrica registrada (memoria).");
-                    } else for (Fabrica f : st.fabricas)
-                        System.out.println("ID: " + f.getId() + " | " + f.getCiudad() + " - " + f.getPais());
+                        System.out.println("Fábrica registrada (memoria).");
+                    } else {
+                        if (st.fabricas.isEmpty()) {
+                            System.out.println("No hay fábricas registradas."); // por si no
+                        } else {
+                            for (Fabrica f : st.fabricas)
+                                System.out.println("ID: " + f.getId() + " | " + f.getCiudad() + " - " + f.getPais());
+                        }
+                    }
                 }
                 case 5 -> {
                     if (st.fabricas.isEmpty()) { System.out.println("⚠ Registre fábricas primero."); break; }
@@ -548,13 +554,21 @@ public class Main {
                     TrabajadorEsclavizado t = new TrabajadorEsclavizado(idT, nomT, paisO, edad, "Hoy", salud, true);
                     fab.asignarTrabajador(t);
                     st.trabajadores.add(t);
-                    System.out.println("✅ Trabajador asignado (memoria).");
+                    // CAMBIO: confirmar indicando en qué fábrica trabaja
+                    System.out.println("Trabajador asignado. ID fabrica "
+                            + fab.getId() + "  " + fab.getCiudad() + " " + fab.getPais() + " ");
                 }
                 case 6 -> {
                     if (st.trabajadores.isEmpty()) { System.out.println("No hay trabajadores registrados."); break; }
                     System.out.println("=== Registro confidencial de trabajadores ===");
-                    for (TrabajadorEsclavizado t : st.trabajadores)
-                        System.out.println("ID: " + t.getId() + " | Nombre: " + t.getNombre());
+                    for (TrabajadorEsclavizado t : st.trabajadores) {
+                        Fabrica f = buscarFabricaDeTrabajador(st, t);
+                        String etiquetaFab = (f == null)
+                                ? "(sin fábrica asignada)"
+                                : ("Fábrica ID " + f.getId() + "  " + f.getCiudad() + " " + f.getPais() + "");
+                        System.out.println("ID: " + t.getId() + "  Nombre: " + t.getNombre()
+                                + "  " + etiquetaFab);
+                    }
                 }
                 case 7 -> seguir = false;
                 default -> System.out.println("⚠ Opción inválida.");
@@ -595,7 +609,24 @@ public class Main {
         }
     }
 
-    // ================== MAIN ==================
+    // busqueda
+    private static Fabrica buscarFabricaDeTrabajador(EstadoPersistente st, TrabajadorEsclavizado t) {
+        if (t == null) return null;
+        for (Fabrica f : st.fabricas) {
+            try {
+                List<TrabajadorEsclavizado> lista = f.getTrabajadores();
+                if (lista == null) continue;
+                for (TrabajadorEsclavizado tt : lista) {
+                    if (tt != null && tt.getId() == t.getId()) return f;
+                }
+            } catch (Exception ignore) {
+
+            }
+        }
+        return null;
+    }
+
+
     public static void main(String[] args)
             throws InvalidProductException, InvalidClientOperationException, EmptyCartException, DataPersistenceException {
 
