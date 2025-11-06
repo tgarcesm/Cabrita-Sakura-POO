@@ -2,7 +2,6 @@ package persistence.csv;
 
 import model.AdministradorContenido;
 import persistence.CsvUtils;
-
 import java.util.List;
 
 public final class AdministradorContenidoCsv {
@@ -37,20 +36,10 @@ public final class AdministradorContenidoCsv {
         boolean estadoCuenta = Boolean.parseBoolean(c.get(6));
         boolean permisos     = Boolean.parseBoolean(c.get(7));
 
-        // El constructor de tu clase pone permisosEdicion=true por defecto.
-        // Si necesitas respetar el valor del CSV, lo seteamos después.
         AdministradorContenido a = new AdministradorContenido(
                 id, nombre, email, passwordHash, rol, fechaRegistro, estadoCuenta
         );
-        // Sobrescribimos si vino false/true desde CSV:
-        try {
-            var field = AdministradorContenido.class.getDeclaredField("permisosEdicion");
-            field.setAccessible(true);
-            field.setBoolean(a, permisos);
-        } catch (Exception ignore) {
-            // Si prefieres, agrega un setter público y úsalo en vez de reflexión.
-            // a.setPermisosEdicion(permisos);
-        }
+        a.setPermisosEdicion(permisos);
         return a;
     }
 }

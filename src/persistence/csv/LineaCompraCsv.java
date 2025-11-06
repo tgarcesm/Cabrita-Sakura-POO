@@ -21,7 +21,7 @@ public final class LineaCompraCsv {
      * @param compraId  id de la compra a la que pertenece
      */
     public static String toRow(LineaCompra l, int compraId) {
-        int productoId = l.getProducto().getId();
+        int productoId = (l.getProducto() != null) ? l.getProducto().getId() : 0;
         return compraId + "," + productoId + "," + l.getCantidad();
     }
 
@@ -31,12 +31,22 @@ public final class LineaCompraCsv {
      * La asociación con la Compra (por compraId) la hace quien llama.
      */
     public static LineaCompra fromRow(String row, Function<Integer, Producto> findProductoById) {
-        List<String> c = CsvUtils.splitRow(row);
-        // c.get(0) = compraId  (lo usará el cargador para asignar a la compra)
-        int productoId = Integer.parseInt(c.get(1));
-        int cantidad   = Integer.parseInt(c.get(2));
+        List<String> cols = CsvUtils.splitRow(row);
 
-        Producto p = findProductoById.apply(productoId);
+        // Robustez básica
+        if (cols.size() < 3) {
+            // fallback básico o lanza excepción si quieres depurar
+            throw new IllegalArgumentException("Línea de LineaCompra inválida: " + row);
+        }
+
+        int productoId = Integer.parseInt(cols.get(1));
+        int cantidad   = Integer.parseInt(cols.get(2));
+
+        Producto p = null;
+        if (findProductoById != null) {
+            p = findProductoById.apply(productoId);
+        }
+
         return new LineaCompra(p, cantidad);
     }
 }

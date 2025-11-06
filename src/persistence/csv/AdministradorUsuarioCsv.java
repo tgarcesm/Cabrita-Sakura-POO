@@ -8,10 +8,12 @@ import java.util.List;
 public final class AdministradorUsuarioCsv {
     private AdministradorUsuarioCsv() {}
 
+    /** Cabecera del CSV */
     public static String header() {
         return "id,nombre,email,passwordHash,rol,fechaRegistro,estadoCuenta,nivelAcceso";
     }
 
+    /** Objeto -> fila CSV */
     public static String toRow(AdministradorUsuario a) {
         return a.getId() + "," +
                 CsvUtils.q(a.getNombre()) + "," +
@@ -19,10 +21,11 @@ public final class AdministradorUsuarioCsv {
                 CsvUtils.q(a.getPasswordHash()) + "," +
                 CsvUtils.q(a.getRol()) + "," +
                 CsvUtils.q(a.getFechaRegistro()) + "," +
-                a.getEstadoCuenta() + "," +            // boolean sin comillas
-                a.getNivelAcceso();                     // int sin comillas
+                a.getEstadoCuenta() + "," +
+                a.getNivelAcceso();
     }
 
+    /** Fila CSV -> objeto */
     public static AdministradorUsuario fromRow(String row) {
         List<String> c = CsvUtils.splitRow(row);
         int id               = Integer.parseInt(c.get(0));
@@ -32,9 +35,8 @@ public final class AdministradorUsuarioCsv {
         String rol           = c.get(4);
         String fechaRegistro = c.get(5);
         boolean estadoCuenta = Boolean.parseBoolean(c.get(6));
-        int nivelAcceso      = Integer.parseInt(c.get(7));  // <- int
+        int nivelAcceso      = Integer.parseInt(c.get(7));
 
-        // usa tu constructor actual con int nivelAcceso
         return new AdministradorUsuario(
                 id, nombre, email, passwordHash, rol, fechaRegistro, estadoCuenta, nivelAcceso
         );

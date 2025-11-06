@@ -13,7 +13,7 @@ public final class DesarrolladorProductoCsv {
         return "id,nombre,email,passwordHash,rol,fechaRegistro,estadoCuenta,permisoEdicion";
     }
 
-    /** Objeto -> fila CSV */
+    /** Objeto -> fila CSV (mismo orden que header) */
     public static String toRow(DesarrolladorProducto d) {
         return d.getId() + "," +
                 CsvUtils.q(d.getNombre()) + "," +
@@ -25,17 +25,21 @@ public final class DesarrolladorProductoCsv {
                 d.getPermisoEdicion();
     }
 
-    /** Fila CSV -> objeto */
+    /** Fila CSV -> objeto (mismo orden que header) */
     public static DesarrolladorProducto fromRow(String row) {
         List<String> cols = CsvUtils.splitRow(row);
 
-        int id               = Integer.parseInt(cols.get(0));
-        String nombre        = cols.get(1);
-        String email         = cols.get(2);
-        String passwordHash  = cols.get(3);
-        String rol           = cols.get(4);
-        String fechaRegistro = cols.get(5);
-        boolean estadoCuenta = Boolean.parseBoolean(cols.get(6));
+        if (cols.size() < 8) {
+            throw new IllegalArgumentException("Línea inválida para DesarrolladorProducto: " + row);
+        }
+
+        int id                 = Integer.parseInt(cols.get(0));
+        String nombre          = cols.get(1);
+        String email           = cols.get(2);
+        String passwordHash    = cols.get(3);
+        String rol             = cols.get(4);
+        String fechaRegistro   = cols.get(5);
+        boolean estadoCuenta   = Boolean.parseBoolean(cols.get(6));
         boolean permisoEdicion = Boolean.parseBoolean(cols.get(7));
 
         DesarrolladorProducto d = new DesarrolladorProducto(

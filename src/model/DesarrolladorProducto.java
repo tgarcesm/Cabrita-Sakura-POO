@@ -14,6 +14,8 @@ public class DesarrolladorProducto extends Usuario {
         return permisoEdicion;
     }
 
+
+
     public void setPermisoEdicion(boolean permisoEdicion) {
         this.permisoEdicion = permisoEdicion;
     }

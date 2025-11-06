@@ -4,129 +4,201 @@ import Exceptions.InvalidClientOperationException;
 import Exceptions.InvalidProductException;
 
 import model.*;
+import persistence.DataManager;
 
-import persistence.PersistenceService;
+import java.util.*;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Scanner;
-
+/**
+ * Main “puro” con persistencia por CSV:
+ * - Carga todo al iniciar y opera en memoria.
+ * - Inicializa TODOS los CSV con header si no existen.
+ * - Guarda TODO al presionar “Salir”.
+ * - Login por email y passwordHash (texto plano por ahora).
+ * - Incluye seed de credenciales base (se crean sólo si no existen).
+ */
 public class Main {
 
-    // ================== UTIL GENERAL ==================
-    private static <T> Map<Integer, T> indexById(List<T> list, java.util.function.ToIntFunction<T> idGetter) {
-        Map<Integer, T> map = new HashMap<>();
-        for (T t : list) map.put(idGetter.applyAsInt(t), t);
-        return map;
-    }
-
-    // ================== CREDENCIAL (LOGIN) ==================
-    static class Credencial {
-        private String username;
-        private String password;
-        private String rol;
-        private Integer clienteId;
-        private String email;
-
-        public Credencial(String username, String password, String rol, String email) {
-            this.username = username;
-            this.password = password;
-            this.rol = rol;
-            this.email = email;
-        }
-
-        public String getUsername() { return username; }
-        public String getPassword() { return password; }
-        public String getRol() { return rol; }
-        public Integer getClienteId() { return clienteId; }
-        public void setClienteId(Integer clienteId) { this.clienteId = clienteId; }
-        public String getEmail() { return email; }
-
-        public boolean verificarPassword(String ingreso) { return password.equals(ingreso); }
-        public void cambiarPassword(String nueva) { this.password = nueva; }
-    }
-
-    // ================== PERSISTENCIA (USANDO PersistenceService) ==================
-
-    private static final PersistenceService PS = new PersistenceService();
+    // ================== PERSISTENCIA ==================
+    private static final DataManager DM = new DataManager();
 
     private static class EstadoPersistente {
+        // Dominio “tienda”
         ArrayList<Categoria> categorias = new ArrayList<>();
         ArrayList<Producto> productos = new ArrayList<>();
         ArrayList<Cliente> clientes = new ArrayList<>();
         ArrayList<MetodoPago> metodosPago = new ArrayList<>();
         ArrayList<Compra> compras = new ArrayList<>();
+
+        // Otros módulos
+        ArrayList<Fabrica> fabricas = new ArrayList<>();
+        ArrayList<TrabajadorEsclavizado> trabajadores = new ArrayList<>();
+
+        // Usuarios no-cliente
+        ArrayList<AdministradorContenido> adminsContenido = new ArrayList<>();
+        ArrayList<AdministradorUsuario> adminsUsuario = new ArrayList<>();
+        ArrayList<DesarrolladorProducto> desarrolladores = new ArrayList<>();
+
+        // ConsejoSombrio NO es Usuario; se guarda aparte si lo usas en otro flujo
+        ArrayList<ConsejoSombrio> consejos = new ArrayList<>();
     }
 
-    private static EstadoPersistente cargarTodo()
-            throws DataPersistenceException, InvalidProductException, InvalidClientOperationException {
+    // ---------- util ----------
+    private static int nextUsuarioId(EstadoPersistente st) {
+        int max = 0;
+        for (AdministradorContenido u : st.adminsContenido) max = Math.max(max, u.getId());
+        for (AdministradorUsuario u : st.adminsUsuario)   max = Math.max(max, u.getId());
+        for (DesarrolladorProducto u : st.desarrolladores) max = Math.max(max, u.getId());
+        for (Cliente u : st.clientes)                      max = Math.max(max, u.getId());
+        return max + 1;
+    }
+
+    private static boolean emailExiste(EstadoPersistente st, String email) {
+        String e = email.trim().toLowerCase();
+        for (AdministradorContenido u : st.adminsContenido) if (u.getEmail().equalsIgnoreCase(e)) return true;
+        for (AdministradorUsuario u : st.adminsUsuario)     if (u.getEmail().equalsIgnoreCase(e)) return true;
+        for (DesarrolladorProducto u : st.desarrolladores)  if (u.getEmail().equalsIgnoreCase(e)) return true;
+        for (Cliente u : st.clientes)                       if (u.getEmail().equalsIgnoreCase(e)) return true;
+        return false;
+    }
+
+    private static void seedCredencialesBase(EstadoPersistente st) {
+        // Se crean SOLO si NO existen ya por email (así quedan en CSV al salir)
+        record Seed(String email, String pass, String rol, String nombre) {}
+        List<Seed> base = List.of(
+                new Seed("contenido@sakura.com", "1234", "ADMIN_CONTENIDO", "adminContenido"),
+                new Seed("usuarios@sakura.com",  "1234", "ADMIN_USUARIOS",  "adminUsuarios"),
+                new Seed("consejo@sakura.com",   "1234", "CONSEJO",         "consejo"),
+                new Seed("sakura@sakura.com",    "9999", "SAKURA",          "Sakura")
+        );
+
+        for (Seed s : base) {
+            if (emailExiste(st, s.email)) continue;
+            int id = nextUsuarioId(st);
+            switch (s.rol) {
+                case "ADMIN_CONTENIDO" -> st.adminsContenido.add(
+                        new AdministradorContenido(id, s.nombre, s.email, s.pass, s.rol, "", true)
+                );
+                case "ADMIN_USUARIOS" -> st.adminsUsuario.add(
+                        new AdministradorUsuario(id, s.nombre, s.email, s.pass, s.rol, "", true, /*nivel*/1)
+                );
+                // Para poder loguear CONSEJO y SAKURA como Usuario, usamos AdministradorUsuario con ese rol.
+                case "CONSEJO" -> st.adminsUsuario.add(
+                        new AdministradorUsuario(id, s.nombre, s.email, s.pass, s.rol, "", true, 9)
+                );
+                case "SAKURA" -> st.adminsUsuario.add(
+                        new AdministradorUsuario(id, s.nombre, s.email, s.pass, s.rol, "", true, 99)
+                );
+            }
+        }
+    }
+
+    private static EstadoPersistente cargarTodo() throws DataPersistenceException {
         EstadoPersistente st = new EstadoPersistente();
-        st.categorias.addAll(PS.cargarCategorias());
-        var idxCat = indexById(st.categorias, Categoria::getId);
 
-        st.productos.addAll(PS.cargarProductos(idxCat));
+        // crea headers de TODOS los csv si no existen
+        bootstrapCrearArchivos();
 
-        // ⬇️ ahora este método también puede lanzar InvalidClientOperationException
-        st.clientes.addAll(PS.cargarClientes());
+        // tienda
+        st.categorias.addAll(DM.loadCategorias());
+        st.productos.addAll(DM.loadProductos());
+        st.clientes.addAll(DM.loadClientes());
+        st.metodosPago.addAll(DM.loadMetodosPago());
+        st.compras.addAll(DM.loadCompras());
 
-        st.metodosPago.addAll(PS.cargarMetodosPago());
-        var idxMetodo = indexById(st.metodosPago, MetodoPago::getId);
+        // otros módulos
+        st.fabricas.addAll(DM.loadFabricas());
+        st.trabajadores.addAll(DM.loadTrabajadores());
 
-        var idxProd = indexById(st.productos, Producto::getId);
-        st.compras.addAll(PS.cargarCompras(idxMetodo, idxProd));
+        // usuarios no-cliente
+        st.adminsContenido.addAll(DM.loadAdminsContenido());
+        st.adminsUsuario.addAll(DM.loadAdminsUsuario());
+        st.desarrolladores.addAll(DM.loadDesarrolladores());
+        st.consejos.addAll(DM.loadConsejo());
 
-        System.out.println("📂 Datos cargados desde /data con PersistenceService.");
+        // credenciales base (si hacen falta)
+        seedCredencialesBase(st);
+
+        System.out.println("📂 Datos cargados correctamente desde /data.");
         return st;
     }
 
-
     private static void guardarTodo(EstadoPersistente st) throws DataPersistenceException {
-        // Guardamos en el orden habitual (no se persiste Dueña)
-        PS.guardarCategorias(st.categorias);
-        PS.guardarProductos(st.productos);
-        PS.guardarClientes(st.clientes);
+        // tienda
+        DM.saveAllCategorias(st.categorias);
+        DM.saveAllProductos(st.productos);
+        DM.saveAllClientes(st.clientes);
+        DM.saveAllMetodosPago(st.metodosPago);
+        DM.saveAllCompras(st.compras);
 
-        // Persistimos métodos de pago solo si el proyecto los está manejando
-        if (!st.metodosPago.isEmpty()) PS.guardarMetodosPago(st.metodosPago);
+        // otros módulos
+        DM.saveAllFabricas(st.fabricas);
+        DM.saveAllTrabajadores(st.trabajadores);
 
-        PS.guardarCompras(st.compras);
+        // usuarios no-cliente
+        DM.saveAllAdminsContenido(st.adminsContenido);
+        DM.saveAllAdminsUsuario(st.adminsUsuario);
+        DM.saveAllDesarrolladores(st.desarrolladores);
+        DM.saveAllConsejos(st.consejos);
 
-        System.out.println("💾 Datos guardados correctamente en /data con PersistenceService.");
+        System.out.println("💾 Datos guardados correctamente en /data.");
     }
 
-    // ================== UTILIDADES LOGIN ==================
+    // Inicializa TODOS los CSV con sus headers (se ejecuta una vez al inicio)
+    private static void bootstrapCrearArchivos() {
+        try {
+            // tienda
+            DM.loadCategorias();
+            DM.loadProductos();
+            DM.loadClientes();
+            DM.loadMetodosPago();
+            DM.loadCompras();
+            DM.loadLineasCompraPorCompraId();
 
-    private static void inicializarUsuariosPorDefecto(ArrayList<Credencial> usuarios) {
-        usuarios.add(new Credencial("adminContenido", "1234", "ADMIN_CONTENIDO", "contenido@sakura.com"));
-        usuarios.add(new Credencial("adminUsuarios", "1234", "ADMIN_USUARIOS", "usuarios@sakura.com"));
-        usuarios.add(new Credencial("consejo", "1234", "CONSEJO", "consejo@sakura.com"));
-        usuarios.add(new Credencial("sakura", "9999", "SAKURA", "sakura@sakura.com"));
+            // otros módulos
+            DM.loadFabricas();
+            DM.loadTrabajadores();
+
+            // usuarios no-cliente
+            DM.loadAdminsContenido();
+            DM.loadAdminsUsuario();
+            DM.loadDesarrolladores();
+            DM.loadConsejo();
+
+            // relaciones auxiliares
+            DM.loadConsejoMiembros(id -> null);
+            DM.loadRegistrosEsclavos();
+            DM.loadRegistroTrabajadores(id -> null);
+
+            System.out.println("✅ Archivos CSV inicializados (headers).");
+        } catch (DataPersistenceException e) {
+            System.out.println("⚠ No se pudieron inicializar todos los CSV: " + e.getMessage());
+        }
     }
 
-    private static Credencial buscarUsuario(ArrayList<Credencial> usuarios, String username) {
-        for (Credencial u : usuarios) if (u.getUsername().equalsIgnoreCase(username)) return u;
+    // ================== LOGIN ==================
+    private static Usuario encontrarUsuarioPorEmail(String email,
+                                                    List<AdministradorContenido> ac,
+                                                    List<AdministradorUsuario> au,
+                                                    List<DesarrolladorProducto> devs,
+                                                    List<Cliente> clientes) {
+        String key = email.trim().toLowerCase();
+        for (AdministradorContenido u : ac) if (u.getEmail().equalsIgnoreCase(key)) return u;
+        for (AdministradorUsuario u : au) if (u.getEmail().equalsIgnoreCase(key)) return u;
+        for (DesarrolladorProducto u : devs) if (u.getEmail().equalsIgnoreCase(key)) return u;
+        for (Cliente u : clientes) if (u.getEmail().equalsIgnoreCase(key)) return u;
         return null;
     }
-
-    private static Cliente buscarClientePorId(ArrayList<Cliente> clientes, Integer id) {
-        if (id == null) return null;
-        for (Cliente c : clientes) if (c.getId() == id) return c;
-        return null;
-    }
-
-    // ================== MENÚS ==================
 
     private static void mostrarMenuLogin() {
         System.out.println("============== SAKURA ENTERPRISES - LOGIN ==============");
         System.out.println("1. Iniciar sesión");
         System.out.println("2. Registrarse como cliente");
-        System.out.println("3. Restablecer contraseña");
+        System.out.println("3. Restablecer contraseña (por email)");
         System.out.println("4. Salir");
         System.out.println("========================================================");
     }
 
+    // ================== MENÚS ==================
     private static void menuAdminContenido(Scanner sc, ArrayList<Producto> productos)
             throws InvalidProductException {
         boolean seguir = true;
@@ -156,7 +228,6 @@ public class Main {
                     System.out.print("Stock: "); int stock = Integer.parseInt(sc.nextLine());
                     System.out.print("Fecha lanzamiento: "); String fecha = sc.nextLine();
                     System.out.print("Categoría (nombre libre o existente): "); String cat = sc.nextLine();
-                    // Nota: si no manejas categorías aún, dejamos id 0 y descripción vacía
                     productos.add(new Producto(id, nombre, desc, precio, stock, fecha, new Categoria(0, cat, "")));
                     System.out.println("✅ Producto creado.");
                 }
@@ -189,64 +260,77 @@ public class Main {
         }
     }
 
-    private static void menuAdminUsuarios(Scanner sc,
-                                          ArrayList<Credencial> usuarios,
-                                          ArrayList<Cliente> clientes)
+    private static void menuAdminUsuarios(Scanner sc, EstadoPersistente st)
             throws InvalidClientOperationException {
         boolean seguir = true;
         while (seguir) {
             System.out.println("=== Menú Administrador de Usuarios ===");
-            System.out.println("1. Ver usuarios");
+            System.out.println("1. Ver usuarios (todos)");
             System.out.println("2. Crear usuario");
-            System.out.println("3. Eliminar usuario");
-            System.out.println("4. Volver al login");
+            System.out.println("3. Eliminar usuario (por email)");
+            System.out.println("4. Volver");
             System.out.print("→ Opción: ");
             int opcion = Integer.parseInt(sc.nextLine());
 
             switch (opcion) {
-                case 1 -> usuarios.forEach(u ->
-                        System.out.println("Usuario: " + u.getUsername() + " | Rol: " + u.getRol()));
+                case 1 -> {
+                    System.out.println("-- ADM CONTENIDO --");
+                    for (AdministradorContenido u : st.adminsContenido)
+                        System.out.println(u.getId() + " | " + u.getEmail() + " | " + u.getRol());
+                    System.out.println("-- ADM USUARIO --");
+                    for (AdministradorUsuario u : st.adminsUsuario)
+                        System.out.println(u.getId() + " | " + u.getEmail() + " | " + u.getRol());
+                    System.out.println("-- DESARROLLADORES --");
+                    for (DesarrolladorProducto u : st.desarrolladores)
+                        System.out.println(u.getId() + " | " + u.getEmail() + " | " + u.getRol());
+                    System.out.println("-- CLIENTES --");
+                    for (Cliente u : st.clientes)
+                        System.out.println(u.getId() + " | " + u.getEmail() + " | CLIENTE");
+                }
                 case 2 -> {
-                    System.out.print("Nuevo nombre de usuario: ");
-                    String nuevoUser = sc.nextLine();
-                    if (buscarUsuario(usuarios, nuevoUser) != null) {
-                        System.out.println("⚠ Ese nombre de usuario ya existe."); break;
-                    }
-                    System.out.print("Email: "); String email = sc.nextLine();
-                    System.out.print("Contraseña: "); String pass = sc.nextLine();
-                    System.out.println("Rol (1=ADMIN_CONTENIDO, 2=ADMIN_USUARIOS, 3=CONSEJO, 4=SAKURA, 5=CLIENTE): ");
-                    int r = Integer.parseInt(sc.nextLine());
-                    String rol = switch (r) {
-                        case 1 -> "ADMIN_CONTENIDO";
-                        case 2 -> "ADMIN_USUARIOS";
-                        case 3 -> "CONSEJO";
-                        case 4 -> "SAKURA";
-                        case 5 -> "CLIENTE";
-                        default -> "";
-                    };
-                    if (rol.isEmpty()) { System.out.println("⚠ Rol inválido."); break; }
+                    System.out.println("Tipo: 1) Admin Contenido  2) Admin Usuario  3) Desarrollador  4) Cliente");
+                    int tipo = Integer.parseInt(sc.nextLine());
+                    System.out.print("ID: "); int id = Integer.parseInt(sc.nextLine());
+                    System.out.print("Nombre: "); String nombre = sc.nextLine();
+                    System.out.print("Email (login): "); String email = sc.nextLine();
 
-                    Credencial nuevo = new Credencial(nuevoUser, pass, rol, email);
-                    if (rol.equals("CLIENTE")) {
-                        System.out.println("Creación de datos de cliente asociado:");
-                        System.out.print("ID cliente (numérico): "); int idC = Integer.parseInt(sc.nextLine());
-                        System.out.print("Dirección: "); String dir = sc.nextLine();
-                        System.out.print("Teléfono: "); String tel = sc.nextLine();
-                        clientes.add(new Cliente(idC, dir, tel));
-                        nuevo.setClienteId(idC);
+                    if (emailExiste(st, email)) {
+                        System.out.println("⚠ Ya existe un usuario con ese email."); break;
                     }
-                    usuarios.add(nuevo);
-                    System.out.println("✅ Usuario creado.");
+
+                    System.out.print("Contraseña (se guarda tal cual en passwordHash): "); String pass = sc.nextLine();
+                    String fecha = ""; boolean estado = true;
+
+                    if (tipo == 1) {
+                        String rol = "ADMIN_CONTENIDO";
+                        st.adminsContenido.add(new AdministradorContenido(id, nombre, email, pass, rol, fecha, estado));
+                    } else if (tipo == 2) {
+                        String rol = "ADMIN_USUARIOS";
+                        System.out.print("Nivel de acceso (int): "); int lvl = Integer.parseInt(sc.nextLine());
+                        st.adminsUsuario.add(new AdministradorUsuario(id, nombre, email, pass, rol, fecha, estado, lvl));
+                    } else if (tipo == 3) {
+                        String rol = "DESARROLLADOR";
+                        st.desarrolladores.add(new DesarrolladorProducto(id, nombre, email, pass, rol, fecha, estado));
+                    } else if (tipo == 4) {
+                        String rol = "CLIENTE";
+                        System.out.print("Dirección: "); String dir = sc.nextLine();
+                        System.out.print("Teléfono: ");  String tel = sc.nextLine();
+                        st.clientes.add(new Cliente(id, nombre, email, pass, rol, fecha, estado, dir, tel));
+                    } else {
+                        System.out.println("⚠ Tipo inválido.");
+                    }
+                    System.out.println("✅ Usuario creado en memoria.");
                 }
                 case 3 -> {
-                    System.out.print("Nombre de usuario a eliminar: ");
-                    String userDel = sc.nextLine();
-                    Credencial u = buscarUsuario(usuarios, userDel);
-                    if (u == null) { System.out.println("⚠ Usuario no encontrado."); break; }
-                    if ("SAKURA".equals(u.getRol())) { System.out.println("⚠ No se puede eliminar a Sakura."); break; }
-                    if (u.getClienteId() != null) clientes.removeIf(cl -> cl.getId() == u.getClienteId());
-                    usuarios.remove(u);
-                    System.out.println("✅ Usuario eliminado.");
+                    System.out.print("Email del usuario a eliminar: ");
+                    String email = sc.nextLine().trim().toLowerCase();
+
+                    boolean removed = st.adminsContenido.removeIf(u -> u.getEmail().equalsIgnoreCase(email));
+                    removed |= st.adminsUsuario.removeIf(u -> u.getEmail().equalsIgnoreCase(email));
+                    removed |= st.desarrolladores.removeIf(u -> u.getEmail().equalsIgnoreCase(email));
+                    removed |= st.clientes.removeIf(u -> u.getEmail().equalsIgnoreCase(email));
+
+                    System.out.println(removed ? "✅ Eliminado de memoria." : "⚠ No encontrado.");
                 }
                 case 4 -> seguir = false;
                 default -> System.out.println("⚠ Opción inválida.");
@@ -254,20 +338,24 @@ public class Main {
         }
     }
 
+    private static Cliente buscarClientePorId(ArrayList<Cliente> clientes, Integer id) {
+        if (id == null) return null;
+        for (Cliente c : clientes) if (c.getId() == id) return c;
+        return null;
+    }
+
     private static void menuCliente(Scanner sc,
                                     ArrayList<Producto> productos,
                                     ArrayList<Cliente> clientes,
                                     ArrayList<Compra> compras,
                                     ArrayList<LineaCarrito> carrito,
-                                    Credencial usuarioActual,
                                     Cliente clienteInicial)
-            throws InvalidClientOperationException, EmptyCartException
-    {
+            throws InvalidClientOperationException, EmptyCartException {
         Cliente clienteActual = clienteInicial;
 
         boolean seguir = true;
         while (seguir) {
-            System.out.println("=== Menú Cliente (" + usuarioActual.getUsername() + ") ===");
+            System.out.println("=== Menú Cliente (" + clienteActual.getNombre() + ") ===");
             System.out.println("1. Seleccionar cliente activo");
             System.out.println("2. Agregar producto al carrito");
             System.out.println("3. Ver carrito");
@@ -277,8 +365,8 @@ public class Main {
             System.out.println("7. Buscar producto por nombre o categoría");
             System.out.println("8. Ver detalles de un producto");
             System.out.println("9. Editar datos del cliente");
-            System.out.println("10. Editar contraseña");
-            System.out.println("11. Volver al login");
+            System.out.println("10. Cambiar contraseña");
+            System.out.println("11. Volver");
             System.out.print("→ Opción: ");
             int opcion = Integer.parseInt(sc.nextLine());
 
@@ -286,10 +374,12 @@ public class Main {
                 case 1 -> {
                     if (clientes.isEmpty()) { System.out.println("⚠ No hay clientes."); break; }
                     System.out.println("=== Seleccionar cliente activo ===");
-                    for (Cliente c : clientes) System.out.println("ID: " + c.getId() + " | " + c.getTelefono());
+                    for (Cliente c : clientes)
+                        System.out.println("ID: " + c.getId() + " | " + c.getEmail() + " | " + c.getTelefono());
                     System.out.print("ID del cliente: "); int idSel = Integer.parseInt(sc.nextLine());
                     clienteActual = buscarClientePorId(clientes, idSel);
-                    System.out.println(clienteActual != null ? "Cliente activo: " + clienteActual.getId() : "⚠ Cliente no encontrado.");
+                    System.out.println(clienteActual != null ? "Cliente activo: " + clienteActual.getEmail()
+                            : "⚠ Cliente no encontrado.");
                 }
                 case 2 -> {
                     if (clienteActual == null) { System.out.println("Seleccione cliente antes de continuar."); break; }
@@ -322,11 +412,9 @@ public class Main {
                 case 5 -> {
                     if (clienteActual == null) { System.out.println("Seleccione cliente antes de comprar."); break; }
                     if (carrito.isEmpty()) { System.out.println("⚠ Carrito vacío."); break; }
-                    System.out.print("Método de pago: "); String metodo = sc.nextLine();
-
+                    System.out.print("Método de pago (texto): "); String metodo = sc.nextLine();
                     Compra compra = new Compra();
-                    // Si no gestionas metodosPago en memoria, igual funciona; el CSV guardará el id
-                    compra.setMetodoPago(new MetodoPago(1, metodo, "titular", "****0000"));
+                    compra.setMetodoPago(new MetodoPago(1, metodo, "titular", "**0000"));
                     compra.setLineasDesdeCarrito(carrito);
                     compra.calcularTotal();
                     compra.setEstado("PAGADA");
@@ -336,7 +424,6 @@ public class Main {
                     System.out.println("✅ Compra registrada. Total: $" + compra.getTotal());
                 }
                 case 6 -> {
-                    if (clienteActual == null) { System.out.println("Seleccione cliente."); break; }
                     if (clienteActual.getCompras() == null || clienteActual.getCompras().isEmpty()) {
                         System.out.println("Este cliente no tiene compras."); break;
                     }
@@ -370,21 +457,28 @@ public class Main {
                             System.out.println("Descripción: " + p.getDescripcion());
                             System.out.println("Precio: $" + p.getPrecio());
                             System.out.println("Stock: " + p.getStock());
-                            System.out.println("Categoría: " + (p.getCategoria() != null ? p.getCategoria().getNombre() : "(sin categoría)"));
+                            System.out.println("Categoría: " + (p.getCategoria() != null
+                                    ? p.getCategoria().getNombre()
+                                    : "(sin categoría)"));
                         }
                 }
                 case 9 -> {
-                    if (clienteActual == null) { System.out.println("Seleccione cliente."); break; }
                     System.out.print("Nueva dirección: "); clienteActual.setDireccionEnvio(sc.nextLine());
                     System.out.print("Nuevo teléfono: ");  clienteActual.setTelefono(sc.nextLine());
-                    System.out.println("✅ Cliente actualizado.");
+                    System.out.println("✅ Cliente actualizado en memoria.");
                 }
                 case 10 -> {
                     System.out.print("Contraseña actual: "); String actual = sc.nextLine();
-                    if (!usuarioActual.verificarPassword(actual)) { System.out.println("⚠ Contraseña incorrecta."); break; }
+                    if (!Objects.equals(clienteActual.getPasswordHash(), actual)) {
+                        System.out.println("⚠ Contraseña incorrecta."); break;
+                    }
                     System.out.print("Nueva contraseña: "); String nueva = sc.nextLine();
-                    usuarioActual.cambiarPassword(nueva);
-                    System.out.println("✅ Contraseña actualizada.");
+                    try {
+                        var f = Usuario.class.getDeclaredField("passwordHash");
+                        f.setAccessible(true);
+                        f.set(clienteActual, nueva);
+                    } catch (Exception ignore) {}
+                    System.out.println("✅ Contraseña actualizada en memoria.");
                 }
                 case 11 -> seguir = false;
                 default -> System.out.println("⚠ Opción inválida.");
@@ -393,15 +487,11 @@ public class Main {
     }
 
     private static void menuSakura(Scanner sc,
-                                   ArrayList<Credencial> usuarios,
+                                   EstadoPersistente st,
                                    ArrayList<Producto> productos,
-                                   ArrayList<Cliente> clientes,
                                    ArrayList<Compra> compras,
-                                   ArrayList<LineaCarrito> carrito,
-                                   ArrayList<Fabrica> fabricaList,
-                                   ArrayList<TrabajadorEsclavizado> registroConfidencial)
-            throws InvalidProductException, InvalidClientOperationException, EmptyCartException
-    {
+                                   ArrayList<LineaCarrito> carrito)
+            throws InvalidProductException, InvalidClientOperationException, EmptyCartException {
         boolean seguir = true;
         while (seguir) {
             System.out.println("=== Menú de Sakura (Dueña) ===");
@@ -411,26 +501,25 @@ public class Main {
             System.out.println("4. Gestión básica de fábricas");
             System.out.println("5. Registrar trabajadores esclavizados");
             System.out.println("6. Ver registro confidencial de trabajadores");
-            System.out.println("7. Volver al login");
+            System.out.println("7. Volver");
             System.out.print("→ Opción: ");
             int opcion = Integer.parseInt(sc.nextLine());
 
             switch (opcion) {
                 case 1 -> menuAdminContenido(sc, productos);
-                case 2 -> menuAdminUsuarios(sc, usuarios, clientes);
+                case 2 -> menuAdminUsuarios(sc, st);
                 case 3 -> {
-                    if (clientes.isEmpty()) { System.out.println("⚠ No hay clientes."); break; }
+                    if (st.clientes.isEmpty()) { System.out.println("⚠ No hay clientes."); break; }
                     System.out.println("Seleccione cliente para ver como:");
-                    for (Cliente c : clientes) System.out.println("ID: " + c.getId() + " | Tel: " + c.getTelefono());
+                    for (Cliente c : st.clientes)
+                        System.out.println("ID: " + c.getId() + " | " + c.getEmail());
                     System.out.print("ID cliente: "); int idCli = Integer.parseInt(sc.nextLine());
-                    Cliente cliente = buscarClientePorId(clientes, idCli);
+                    Cliente cliente = buscarClientePorId(st.clientes, idCli);
                     if (cliente == null) { System.out.println("⚠ Cliente no encontrado."); break; }
-                    Credencial fake = new Credencial("sakura-como-cliente", "x", "CLIENTE", "sakura@sakura.com");
-                    fake.setClienteId(cliente.getId());
-                    menuCliente(sc, productos, clientes, compras, carrito, fake, cliente);
+                    menuCliente(sc, productos, st.clientes, compras, carrito, cliente);
                 }
                 case 4 -> {
-                    System.out.println("1. Registrar fábrica\n2. Ver fábricas");
+                    System.out.println("1. Registrar fábrica  2. Ver fábricas");
                     int subF = Integer.parseInt(sc.nextLine());
                     if (subF == 1) {
                         System.out.print("ID: "); int idF = Integer.parseInt(sc.nextLine());
@@ -438,33 +527,33 @@ public class Main {
                         System.out.print("Ciudad: "); String ciudad = sc.nextLine();
                         System.out.print("Capacidad: "); int cap = Integer.parseInt(sc.nextLine());
                         System.out.print("Nivel automatización: "); int auto = Integer.parseInt(sc.nextLine());
-                        fabricaList.add(new Fabrica(idF, pais, ciudad, cap, auto));
-                        System.out.println("✅ Fábrica registrada.");
-                    } else for (Fabrica f : fabricaList)
+                        st.fabricas.add(new Fabrica(idF, pais, ciudad, cap, auto));
+                        System.out.println("✅ Fábrica registrada (memoria).");
+                    } else for (Fabrica f : st.fabricas)
                         System.out.println("ID: " + f.getId() + " | " + f.getCiudad() + " - " + f.getPais());
                 }
                 case 5 -> {
-                    if (fabricaList.isEmpty()) { System.out.println("⚠ Registre fábricas primero."); break; }
+                    if (st.fabricas.isEmpty()) { System.out.println("⚠ Registre fábricas primero."); break; }
                     System.out.print("ID trabajador: "); int idT = Integer.parseInt(sc.nextLine());
                     System.out.print("Nombre: "); String nomT = sc.nextLine();
                     System.out.print("País origen: "); String paisO = sc.nextLine();
                     System.out.print("Edad: "); int edad = Integer.parseInt(sc.nextLine());
                     System.out.print("Salud: "); String salud = sc.nextLine();
-                    System.out.println("Seleccione fábrica:");
-                    for (Fabrica f : fabricaList) System.out.println(f.getId() + " - " + f.getCiudad());
+                    System.out.println("Seleccione fábrica (id):");
+                    for (Fabrica f : st.fabricas) System.out.println(f.getId() + " - " + f.getCiudad());
                     int idFab = Integer.parseInt(sc.nextLine());
                     Fabrica fab = null;
-                    for (Fabrica f : fabricaList) if (f.getId() == idFab) fab = f;
+                    for (Fabrica f : st.fabricas) if (f.getId() == idFab) fab = f;
                     if (fab == null) { System.out.println("⚠ Fábrica no encontrada."); break; }
                     TrabajadorEsclavizado t = new TrabajadorEsclavizado(idT, nomT, paisO, edad, "Hoy", salud, true);
                     fab.asignarTrabajador(t);
-                    registroConfidencial.add(t);
-                    System.out.println("✅ Trabajador asignado y registrado confidencialmente.");
+                    st.trabajadores.add(t);
+                    System.out.println("✅ Trabajador asignado (memoria).");
                 }
                 case 6 -> {
-                    if (registroConfidencial.isEmpty()) { System.out.println("No hay trabajadores registrados."); break; }
+                    if (st.trabajadores.isEmpty()) { System.out.println("No hay trabajadores registrados."); break; }
                     System.out.println("=== Registro confidencial de trabajadores ===");
-                    for (TrabajadorEsclavizado t : registroConfidencial)
+                    for (TrabajadorEsclavizado t : st.trabajadores)
                         System.out.println("ID: " + t.getId() + " | Nombre: " + t.getNombre());
                 }
                 case 7 -> seguir = false;
@@ -474,34 +563,31 @@ public class Main {
     }
 
     private static void menuConsejo(Scanner sc,
-                                    ArrayList<Credencial> usuarios,
+                                    EstadoPersistente st,
                                     ArrayList<Producto> productos,
-                                    ArrayList<Cliente> clientes,
                                     ArrayList<Compra> compras,
-                                    ArrayList<LineaCarrito> carrito,
-                                    ArrayList<Fabrica> fabricaList,
-                                    ArrayList<TrabajadorEsclavizado> registroConfidencial)
-            throws InvalidProductException, InvalidClientOperationException, EmptyCartException
-    {
+                                    ArrayList<LineaCarrito> carrito)
+            throws InvalidProductException, InvalidClientOperationException, EmptyCartException {
         boolean seguir = true;
         while (seguir) {
             System.out.println("=== Menú Consejo Sombrío ===");
             System.out.println("1. Menú Administrador de Contenido");
             System.out.println("2. Menú Administrador de Usuarios");
             System.out.println("3. Ingresar como Sakura");
-            System.out.println("4. Volver al login");
+            System.out.println("4. Volver");
             System.out.print("→ Opción: ");
             int opcion = Integer.parseInt(sc.nextLine());
 
             switch (opcion) {
                 case 1 -> menuAdminContenido(sc, productos);
-                case 2 -> menuAdminUsuarios(sc, usuarios, clientes);
+                case 2 -> menuAdminUsuarios(sc, st);
                 case 3 -> {
-                    Credencial sakura = buscarUsuario(usuarios, "sakura");
-                    if (sakura == null) { System.out.println("⚠ No existe el usuario Sakura."); break; }
+                    Usuario sakura = encontrarUsuarioPorEmail("sakura@sakura.com",
+                            st.adminsContenido, st.adminsUsuario, st.desarrolladores, st.clientes);
+                    if (sakura == null) { System.out.println("⚠ No existe Sakura."); break; }
                     System.out.print("Contraseña de Sakura: "); String pass = sc.nextLine();
-                    if (!sakura.verificarPassword(pass)) { System.out.println("⚠ Contraseña incorrecta."); break; }
-                    menuSakura(sc, usuarios, productos, clientes, compras, carrito, fabricaList, registroConfidencial);
+                    if (!Objects.equals(sakura.getPasswordHash(), pass)) { System.out.println("⚠ Contraseña incorrecta."); break; }
+                    menuSakura(sc, st, productos, compras, carrito);
                 }
                 case 4 -> seguir = false;
                 default -> System.out.println("⚠ Opción inválida.");
@@ -511,30 +597,15 @@ public class Main {
 
     // ================== MAIN ==================
     public static void main(String[] args)
-            throws InvalidProductException, InvalidClientOperationException, EmptyCartException, DataPersistenceException
-    {
+            throws InvalidProductException, InvalidClientOperationException, EmptyCartException, DataPersistenceException {
+
         Scanner sc = new Scanner(System.in);
 
-        // Estado en memoria
-        ArrayList<Categoria> categorias;
-        ArrayList<Producto> productos;
-        ArrayList<Cliente> clientes;
-        ArrayList<MetodoPago> metodosPago;
-        ArrayList<Compra> compras;
-        ArrayList<LineaCarrito> carrito = new ArrayList<>();
-        ArrayList<Fabrica> fabricaList = new ArrayList<>();
-        ArrayList<TrabajadorEsclavizado> registroConfidencial = new ArrayList<>();
-        ArrayList<Credencial> usuarios = new ArrayList<>();
-
-        // Cargar todo desde PersistenceService
+        // Estado en memoria (carga + seed base si falta)
         EstadoPersistente st = cargarTodo();
-        categorias  = st.categorias;
-        productos   = st.productos;
-        clientes    = st.clientes;
-        metodosPago = st.metodosPago;
-        compras     = st.compras;
 
-        inicializarUsuariosPorDefecto(usuarios);
+        // Carrito (temporal en memoria)
+        ArrayList<LineaCarrito> carrito = new ArrayList<>();
 
         boolean salir = false;
         while (!salir) {
@@ -544,63 +615,68 @@ public class Main {
 
             switch (opcionLogin) {
                 case 1 -> {
-                    System.out.print("Usuario: "); String user = sc.nextLine();
-                    System.out.print("Contraseña: "); String pass = sc.nextLine();
-                    Credencial u = buscarUsuario(usuarios, user);
-                    if (u == null || !u.verificarPassword(pass)) {
-                        System.out.println("⚠ Usuario o contraseña incorrectos."); break;
-                    }
-                    switch (u.getRol()) {
-                        case "ADMIN_CONTENIDO" -> menuAdminContenido(sc, productos);
-                        case "ADMIN_USUARIOS" -> menuAdminUsuarios(sc, usuarios, clientes);
-                        case "CONSEJO" -> menuConsejo(sc, usuarios, productos, clientes, compras, carrito, fabricaList, registroConfidencial);
-                        case "SAKURA" -> menuSakura(sc, usuarios, productos, clientes, compras, carrito, fabricaList, registroConfidencial);
-                        case "CLIENTE" -> {
-                            Cliente cli = buscarClientePorId(clientes, u.getClienteId());
-                            if (cli == null) { System.out.println("⚠ Cliente asociado no encontrado."); break; }
-                            menuCliente(sc, productos, clientes, compras, carrito, u, cli);
-                        }
-                        default -> System.out.println("⚠ Rol desconocido.");
-                    }
-                }
-                case 2 -> {
-                    System.out.print("Elija nombre de usuario: ");
-                    String nuevoUser = sc.nextLine();
-                    if (buscarUsuario(usuarios, nuevoUser) != null) { System.out.println("⚠ Ese usuario ya existe."); break; }
                     System.out.print("Email: "); String email = sc.nextLine();
                     System.out.print("Contraseña: "); String pass = sc.nextLine();
 
-                    System.out.println("Datos del cliente asociado:");
+                    Usuario u = encontrarUsuarioPorEmail(email, st.adminsContenido, st.adminsUsuario, st.desarrolladores, st.clientes);
+                    if (u == null || !Objects.equals(u.getPasswordHash(), pass)) {
+                        System.out.println("⚠ Usuario o contraseña incorrectos."); break;
+                    }
+                    String rol = u.getRol();
+                    if ("ADMIN_CONTENIDO".equalsIgnoreCase(rol)) {
+                        menuAdminContenido(sc, st.productos);
+                    } else if ("ADMIN_USUARIOS".equalsIgnoreCase(rol)) {
+                        menuAdminUsuarios(sc, st);
+                    } else if ("DESARROLLADOR".equalsIgnoreCase(rol)) {
+                        menuAdminContenido(sc, st.productos);
+                    } else if ("CONSEJO".equalsIgnoreCase(rol)) {
+                        menuConsejo(sc, st, st.productos, st.compras, carrito);
+                    } else if ("SAKURA".equalsIgnoreCase(rol)) {
+                        menuSakura(sc, st, st.productos, st.compras, carrito);
+                    } else if ("CLIENTE".equalsIgnoreCase(rol)) {
+                        Cliente cli = (u instanceof Cliente c) ? c : null;
+                        if (cli == null) {
+                            for (Cliente c : st.clientes) if (c.getEmail().equalsIgnoreCase(email)) { cli = c; break; }
+                        }
+                        if (cli == null) { System.out.println("⚠ Cliente asociado no encontrado."); break; }
+                        menuCliente(sc, st.productos, st.clientes, st.compras, carrito, cli);
+                    } else {
+                        System.out.println("⚠ Rol desconocido: " + rol);
+                    }
+                }
+                case 2 -> {
+                    System.out.println("=== Registro de nuevo cliente ===");
                     System.out.print("ID (número): "); int idC = Integer.parseInt(sc.nextLine());
+                    System.out.print("Nombre: "); String nombre = sc.nextLine();
+                    System.out.print("Email (login): "); String email = sc.nextLine();
+
+                    if (emailExiste(st, email)) {
+                        System.out.println("⚠ Ya existe un usuario con ese email."); break;
+                    }
+
+                    System.out.print("Contraseña: "); String pass = sc.nextLine();
                     System.out.print("Dirección: "); String dir = sc.nextLine();
                     System.out.print("Teléfono: "); String tel = sc.nextLine();
-                    clientes.add(new Cliente(idC, dir, tel));
 
-                    Credencial cred = new Credencial(nuevoUser, pass, "CLIENTE", email);
-                    cred.setClienteId(idC);
-                    usuarios.add(cred);
+                    Cliente c = new Cliente(idC, nombre, email, pass, "CLIENTE", "", true, dir, tel);
+                    st.clientes.add(c);
 
-                    System.out.println("✅ Usuario cliente registrado.");
+                    System.out.println("✅ Cliente registrado en memoria (se guardará al salir).");
                 }
                 case 3 -> {
-                    System.out.print("Nombre de usuario: "); String user = sc.nextLine();
-                    Credencial u = buscarUsuario(usuarios, user);
+                    System.out.print("Email: "); String email = sc.nextLine();
+                    Usuario u = encontrarUsuarioPorEmail(email, st.adminsContenido, st.adminsUsuario, st.desarrolladores, st.clientes);
                     if (u == null) { System.out.println("⚠ Usuario no encontrado."); break; }
-                    System.out.print("Email registrado: "); String email = sc.nextLine();
-                    if (!u.getEmail().equalsIgnoreCase(email)) { System.out.println("⚠ El email no coincide."); break; }
                     System.out.print("Nueva contraseña: "); String nueva = sc.nextLine();
-                    u.cambiarPassword(nueva);
-                    System.out.println("✅ Contraseña restablecida.");
+                    try {
+                        var f = Usuario.class.getDeclaredField("passwordHash");
+                        f.setAccessible(true);
+                        f.set(u, nueva);
+                    } catch (Exception ignore) {}
+                    System.out.println("✅ Contraseña actualizada en memoria.");
                 }
                 case 4 -> {
                     System.out.println("Guardando cambios y saliendo...");
-                    // Actualizar estado persistente con las listas actuales
-                    st.categorias  = categorias;
-                    st.productos   = productos;
-                    st.clientes    = clientes;
-                    st.metodosPago = metodosPago; // si no manejaste ninguno, estará vacío
-                    st.compras     = compras;
-
                     guardarTodo(st);
                     salir = true;
                 }
@@ -609,6 +685,6 @@ public class Main {
         }
 
         sc.close();
-        System.out.println(" Gracias por usar Sakura Enterprises ");
+        System.out.println("Gracias por usar Sakura Enterprises.");
     }
 }

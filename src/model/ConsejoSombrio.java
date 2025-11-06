@@ -7,6 +7,9 @@ public class ConsejoSombrio {
     private String nombreClave;
     private ArrayList<Usuario> miembros = new ArrayList<>();
 
+    public ConsejoSombrio(int id, String nombreClave) {
+    }
+
     public void agregarMiembro(Usuario u) { miembros.add(u); }
     public void removerMiembro(Usuario u) { miembros.remove(u); }
     public void verMiembros() {
@@ -16,6 +19,10 @@ public class ConsejoSombrio {
     public int getId() {
         return id;
     }
+
+    public void setId(int id) { this.id = id; }
+    public void setNombreClave(String nombreClave) { this.nombreClave = nombreClave; }
+
 
     public String getNombreClave() {
         return nombreClave;

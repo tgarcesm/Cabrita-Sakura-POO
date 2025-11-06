@@ -23,22 +23,43 @@ public final class RegistroEsclavosCsv {
     /** Fila CSV -> objeto */
     public static RegistroEsclavos fromRow(String row) {
         List<String> cols = CsvUtils.splitRow(row);
+
+        if (cols.size() < 3) {
+            throw new IllegalArgumentException("Línea inválida para RegistroEsclavos: " + row);
+        }
+
+        int id = parseIntSafe(cols.get(0));
         String ultimoAcceso = cols.get(1);
-        int nivelTrafico = Integer.parseInt(cols.get(2));
+        int nivelTrafico = parseIntSafe(cols.get(2));
 
         RegistroEsclavos r = new RegistroEsclavos();
-        try {
-            var f1 = RegistroEsclavos.class.getDeclaredField("ultimoAcceso");
-            f1.setAccessible(true);
-            f1.set(r, ultimoAcceso);
 
-            var f2 = RegistroEsclavos.class.getDeclaredField("nivelTrafico");
-            f2.setAccessible(true);
-            f2.setInt(r, nivelTrafico);
+        try {
+            // Asignar campos mediante reflexión (si no existen setters públicos)
+            var fId = RegistroEsclavos.class.getDeclaredField("id");
+            fId.setAccessible(true);
+            fId.setInt(r, id);
+
+            var fUlt = RegistroEsclavos.class.getDeclaredField("ultimoAcceso");
+            fUlt.setAccessible(true);
+            fUlt.set(r, ultimoAcceso);
+
+            var fNiv = RegistroEsclavos.class.getDeclaredField("nivelTrafico");
+            fNiv.setAccessible(true);
+            fNiv.setInt(r, nivelTrafico);
         } catch (Exception e) {
             e.printStackTrace();
         }
 
         return r;
+    }
+
+    /** Manejo seguro de enteros vacíos o inválidos */
+    private static int parseIntSafe(String s) {
+        try {
+            return (s == null || s.isBlank()) ? 0 : Integer.parseInt(s.trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 }
